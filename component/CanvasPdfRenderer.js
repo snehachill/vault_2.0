@@ -8,28 +8,26 @@ if (typeof window !== "undefined") {
   pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 }
 
-const RENDER_SCALE = 1.5; // Scale for canvas rendering
+const PRIMARY = "#25671E";
 
-export default function CanvasPdfRenderer({ paperId, storageUrl }) {
+export default function CanvasPdfRenderer({ paperId, onContainerScroll }) {
   const containerRef = useRef(null);
-  const pageContainerRef = useRef(null);
+  const pageRefs = useRef([]);
+
   const [pdfDoc, setPdfDoc] = useState(null);
   const [totalPages, setTotalPages] = useState(0);
-  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [pageWidth, setPageWidth] = useState(0);
-  const [renderingPages, setRenderingPages] = useState(new Set());
-  const [visiblePages, setVisiblePages] = useState(new Set([1]));
+  const [renderVersion, setRenderVersion] = useState(0);
+  const [rendering, setRendering] = useState(false);
 
-  // Fetch and load PDF
+  // Fetch and load the full PDF once
   useEffect(() => {
     const loadPdf = async () => {
       try {
         setLoading(true);
         setError(null);
 
-        // Fetch PDF from protected endpoint
         const response = await fetch(`/api/papers/${paperId}/content`);
 
         if (!response.ok) {
@@ -45,10 +43,9 @@ export default function CanvasPdfRenderer({ paperId, storageUrl }) {
         const arrayBuffer = await response.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
+        pageRefs.current = new Array(pdf.numPages);
         setPdfDoc(pdf);
         setTotalPages(pdf.numPages);
-        setCurrentPage(1);
-        setVisiblePages(new Set([1]));
       } catch (err) {
         console.error("Error loading PDF:", err);
         setError(err.message || "Failed to load PDF");
@@ -60,145 +57,87 @@ export default function CanvasPdfRenderer({ paperId, storageUrl }) {
     loadPdf();
   }, [paperId]);
 
-  // Render a single page to canvas
-  const renderPage = useCallback(
-    async (pageNum) => {
-      if (!pdfDoc || renderingPages.has(pageNum)) return;
+  // Render all pages to canvases, auto-fitting the container width for mobile/desktop
+  const renderAllPages = useCallback(async () => {
+    if (!pdfDoc || !totalPages) return;
 
-      setRenderingPages((prev) => new Set(prev).add(pageNum));
+    setRendering(true);
 
-      try {
+    try {
+      const containerWidth = containerRef.current?.clientWidth ? containerRef.current.clientWidth - 24 : undefined;
+
+      for (let pageNum = 1; pageNum <= totalPages; pageNum += 1) {
         const page = await pdfDoc.getPage(pageNum);
-        const viewport = page.getViewport({ scale: RENDER_SCALE });
+        const baseViewport = page.getViewport({ scale: 1 });
 
-        // Create canvas
+        const targetWidth = containerWidth ? Math.min(containerWidth, 1100) : baseViewport.width;
+        const scale = Math.max(0.72, targetWidth / baseViewport.width);
+        const viewport = page.getViewport({ scale });
+
         const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
+        const context = canvas.getContext("2d", { alpha: false });
 
         canvas.width = viewport.width;
         canvas.height = viewport.height;
-        canvas.id = `page-canvas-${pageNum}`;
+        canvas.style.width = "100%";
+        canvas.style.height = "auto";
+        canvas.style.display = "block";
 
-        // Render page to canvas
-        const renderContext = {
-          canvasContext: context,
-          viewport,
-        };
+        await page.render({ canvasContext: context, viewport }).promise;
 
-        await page.render(renderContext).promise;
-
-        // Replace placeholder or append
-        const pageElement = document.getElementById(`page-${pageNum}`);
-        if (pageElement) {
-          const existingCanvas = pageElement.querySelector("canvas");
-          if (existingCanvas) {
-            existingCanvas.replaceWith(canvas);
-          } else {
-            pageElement.appendChild(canvas);
-          }
+        const wrapper = pageRefs.current[pageNum - 1];
+        if (wrapper) {
+          wrapper.innerHTML = "";
+          wrapper.appendChild(canvas);
         }
-      } catch (err) {
-        console.error(`Error rendering page ${pageNum}:`, err);
-      } finally {
-        setRenderingPages((prev) => {
-          const next = new Set(prev);
-          next.delete(pageNum);
-          return next;
-        });
       }
-    },
-    [pdfDoc, renderingPages]
-  );
+    } catch (err) {
+      console.error("Error rendering PDF:", err);
+      setError("Failed to render PDF");
+    } finally {
+      setRendering(false);
+    }
+  }, [pdfDoc, totalPages]);
 
-  // Observe visible pages using Intersection Observer
+  // Re-render pages when PDF loads or container width changes
   useEffect(() => {
-    if (!pdfDoc) return;
+    if (pdfDoc && totalPages) {
+      renderAllPages();
+    }
+  }, [pdfDoc, totalPages, renderAllPages, renderVersion]);
 
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const newVisiblePages = new Set(visiblePages);
+  // Watch container width to keep pages responsive on resize/orientation change
+  useEffect(() => {
+    if (!containerRef.current) return undefined;
 
-        entries.forEach((entry) => {
-          const pageNum = parseInt(entry.target.id.replace("page-", ""), 10);
-          if (entry.isIntersecting) {
-            newVisiblePages.add(pageNum);
-            // Also add adjacent pages for smoother scrolling
-            if (pageNum > 1) newVisiblePages.add(pageNum - 1);
-            if (pageNum < totalPages) newVisiblePages.add(pageNum + 1);
-          } else if (pageNum > currentPage + 5 || pageNum < currentPage - 5) {
-            // Unload pages far away from current view to save memory
-            const pageElement = document.getElementById(`page-${pageNum}`);
-            if (pageElement) {
-              const canvas = pageElement.querySelector("canvas");
-              if (canvas) {
-                canvas.remove();
-              }
-            }
-          }
-        });
-
-        setVisiblePages(newVisiblePages);
-
-        // Render visible pages
-        newVisiblePages.forEach((pageNum) => {
-          const pageElement = document.getElementById(`page-${pageNum}`);
-          if (pageElement && !pageElement.querySelector("canvas")) {
-            renderPage(pageNum);
-          }
-        });
-      },
-      { rootMargin: "50px" }
-    );
-
-    // Observe all page containers
-    document.querySelectorAll('[id^="page-"]').forEach((element) => {
-      observer.observe(element);
+    let lastWidth = containerRef.current.clientWidth;
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0].contentRect.width;
+      if (Math.abs(nextWidth - lastWidth) > 24) {
+        lastWidth = nextWidth;
+        setRenderVersion((v) => v + 1);
+      }
     });
 
+    observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [pdfDoc, totalPages, renderPage, visiblePages, currentPage]);
+  }, []);
 
-  // Handle keyboard navigation
-  useEffect(() => {
-    const handleKeyPress = (e) => {
-      // Prevent common screenshot/save shortcuts in this view
-      if ((e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "p")) {
-        e.preventDefault();
-      }
-      // Navigate pages with arrow keys
-      if (e.key === "ArrowDown" && currentPage < totalPages) {
-        setCurrentPage(currentPage + 1);
-      } else if (e.key === "ArrowUp" && currentPage > 1) {
-        setCurrentPage(currentPage - 1);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyPress);
-    return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [currentPage, totalPages]);
-
-  // Auto-scroll to current page
-  useEffect(() => {
-    if (currentPage > 0) {
-      const pageElement = document.getElementById(`page-${currentPage}`);
-      if (pageElement) {
-        pageElement.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    }
-  }, [currentPage]);
-
-  // Handle right-click context menu
   const handleContextMenu = (e) => {
     e.preventDefault();
     return false;
+  };
+
+  const handleScroll = (e) => {
+    onContainerScroll?.(e.target.scrollTop);
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
         <div className="flex flex-col items-center gap-4">
-          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-green-600 animate-spin" />
-          <p className="text-gray-600">Loading PDF...</p>
+          <div className="h-12 w-12 rounded-full border-4 border-gray-200 border-t-[var(--primary,_#25671E)] animate-spin" />
+          <p className="text-gray-600">Loading paper...</p>
         </div>
       </div>
     );
@@ -206,9 +145,9 @@ export default function CanvasPdfRenderer({ paperId, storageUrl }) {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center py-16">
-        <div className="rounded-lg border border-red-200 bg-red-50 p-6 max-w-md">
-          <h3 className="font-semibold text-red-800 mb-2">Unable to Load PDF</h3>
+      <div className="flex items-center justify-center py-16 px-4">
+        <div className="rounded-xl border border-red-200 bg-red-50 p-6 max-w-md w-full shadow-sm">
+          <h3 className="font-semibold text-red-800 mb-2">Unable to load PDF</h3>
           <p className="text-sm text-red-700">{error}</p>
         </div>
       </div>
@@ -216,85 +155,46 @@ export default function CanvasPdfRenderer({ paperId, storageUrl }) {
   }
 
   return (
-    <div
-      ref={containerRef}
-      className="bg-gray-50 rounded-lg overflow-auto select-none"
-      onContextMenu={handleContextMenu}
-      style={{
-        height: "calc(100vh - 200px)",
-        userSelect: "none",
-        WebkitUserSelect: "none",
-      }}
-    >
-      {/* Page Controls */}
-      <div className="sticky top-0 z-20 bg-white border-b border-gray-200 p-4 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setCurrentPage(Math.max(1, currentPage - 1))}
-            disabled={currentPage === 1}
-            className="px-4 py-2 rounded-lg bg-green-600 text-white disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-green-700 transition"
-          >
-            ← Previous
-          </button>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min="1"
-              max={totalPages}
-              value={currentPage}
-              onChange={(e) => {
-                const page = Math.min(Math.max(1, parseInt(e.target.value) || 1), totalPages);
-                setCurrentPage(page);
-              }}
-              className="w-12 px-2 py-2 border border-gray-300 rounded text-center"
-            />
-            <span className="text-sm text-gray-600">
-              of <strong>{totalPages}</strong>
-            </span>
-          </div>
-
-          <button
-            onClick={() => setCurrentPage(Math.min(totalPages, currentPage + 1))}
-            disabled={currentPage === totalPages}
-            className="px-4 py-2 rounded-lg bg-green-600 text-white disabled:bg-gray-300 disabled:cursor-not-allowed hover:bg-green-700 transition"
-          >
-            Next →
-          </button>
+    <div className="relative rounded-2xl border border-gray-200/70 shadow-sm bg-white/90 backdrop-blur">
+      <div className="flex items-center justify-between gap-4 px-4 sm:px-6 py-3 border-b border-gray-200/70">
+        <div className="flex items-center gap-2 text-sm font-medium" style={{ color: PRIMARY }}>
+          <span className="inline-flex h-2 w-2 rounded-full" style={{ background: PRIMARY }} />
+          Protected paper · Scroll to read
         </div>
-
-        <div className="text-sm text-gray-600">
-          Protected Content • Use arrow keys to navigate
-        </div>
+        <span className="text-xs text-gray-500">Auto-fit for mobile and desktop</span>
       </div>
 
-      {/* PDF Pages Container */}
       <div
-        ref={pageContainerRef}
-        className="p-8 flex flex-col items-center gap-8"
-        style={{ userSelect: "none" }}
+        ref={containerRef}
+        className="max-h-[calc(100vh-160px)] sm:max-h-[calc(100vh-190px)] overflow-y-auto px-3 sm:px-6 py-5 select-none"
+        style={{ WebkitUserSelect: "none" }}
+        onContextMenu={handleContextMenu}
+        onScroll={handleScroll}
       >
-        {Array.from({ length: totalPages }, (_, i) => (
-          <div
-            key={i + 1}
-            id={`page-${i + 1}`}
-            className="bg-white rounded-lg shadow-md overflow-hidden flex items-center justify-center"
-            style={{
-              minHeight: "400px",
-              maxWidth: "100%",
-              userSelect: "none",
-            }}
-          >
-            <div className="text-gray-400 text-sm">Rendering page {i + 1}...</div>
-          </div>
-        ))}
+        <div className="mx-auto w-full max-w-5xl flex flex-col gap-6">
+          {rendering && (
+            <div className="text-xs text-gray-500 mb-2">Optimizing layout for your screen…</div>
+          )}
+
+          {Array.from({ length: totalPages }, (_, i) => (
+            <div
+              key={i}
+              ref={(el) => {
+                pageRefs.current[i] = el;
+              }}
+              className="w-full overflow-hidden rounded-xl bg-white border border-gray-200 shadow-sm" 
+              style={{ minHeight: "320px", boxShadow: "0 18px 40px rgba(37, 103, 30, 0.06)" }}
+            >
+              <div className="flex items-center justify-center py-12 text-sm text-gray-400">
+                Preparing page {i + 1}...
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Footer Info */}
-      <div className="sticky bottom-0 bg-white border-t border-gray-200 p-4 text-xs text-gray-600 text-center">
-        <p>
-          ⓘ This content is protected and cannot be downloaded or copied.
-        </p>
+      <div className="px-4 sm:px-6 py-3 border-t border-gray-200/70 text-xs text-gray-600 bg-white/90">
+        <p>ⓘ Protected content. Downloading and copying are disabled.</p>
       </div>
     </div>
   );

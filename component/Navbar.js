@@ -195,6 +195,35 @@ export default function Navbar({ coins }) {
                         </div>
                       </div>
 
+                      {/* Mobile quick links */}
+                      <div
+                        className="md:hidden px-2 py-2"
+                        style={{ borderBottom: "1px solid rgba(37, 103, 30, 0.1)", background: "rgba(37, 103, 30, 0.03)" }}
+                      >
+                        {[{ label: "Browse", href: "/user/browse" }, { label: "Leaderboard", href: "/user/leaderboard" }]
+                          .map((item) => (
+                            <Link
+                              key={item.label}
+                              href={item.href}
+                              onClick={() => setIsMenuOpen(false)}
+                              className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors hover:bg-white/70"
+                              style={{ color: "#25671E" }}
+                            >
+                              {item.label}
+                            </Link>
+                          ))}
+                        {session?.user && (
+                          <Link
+                            href="/user/upload"
+                            onClick={() => setIsMenuOpen(false)}
+                            className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors hover:bg-white/70"
+                            style={{ color: "#25671E" }}
+                          >
+                            Upload
+                          </Link>
+                        )}
+                      </div>
+
                       <div className="px-2 py-2">
                         {[
                           { label: "My Dashboard", href: "/user/dashboard", icon: <LayoutDashboard size={16} /> },
