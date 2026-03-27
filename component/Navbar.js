@@ -35,9 +35,9 @@ export default function Navbar({ coins }) {
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
     >
-      <div className="px-4 sm:px-6 lg:px-8">
+      <div className="px-4 pb-1 mb-1 sm:px-6 lg:px-8">
         <div
-          className="mt-4 flex items-center justify-between rounded-2xl px-4 py-2 sm:px-6"
+          className="mt-4 flex items-center justify-between rounded-2xl px-4 py-1 sm:px-6"
           style={{
             background: "rgba(247, 240, 240, 0.88)",
             backdropFilter: "blur(16px)",
@@ -72,6 +72,7 @@ export default function Navbar({ coins }) {
             {[
               { label: "Browse", href: "/user/browse", authOnly: false },
               { label: "Upload", href: "/user/upload", authOnly: true },
+              { label: "Leaderboard", href: "/user/leaderboard", authOnly: false },
             ]
               .filter((item) => !item.authOnly || session?.user)
               .map(({ label, href }) => (

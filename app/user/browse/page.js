@@ -2,14 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Search, Filter, X, FileText, Heart,
   Building2, BookOpenText, GraduationCap, Sparkles,
   Calendar, ChevronLeft, ChevronRight, Loader2,
   TrendingUp, Eye
 } from "lucide-react";
-import { getPapers, getFilterOptions, savePaper, checkSavedPapers } from "@/app/actions/paperActions";
+import { getPapers, getFilterOptions, savePaper, checkSavedPapers, checkUnlockedPapers, unlockPaper } from "@/app/actions/paperActions";
 import { useSession } from "next-auth/react";
+
+const UNLOCK_COST = 8;
 
 const fadeInUp = {
   hidden: { opacity: 0, y: 18 },
@@ -22,6 +25,8 @@ const fadeInUp = {
 
 export default function BrowsePapersPage() {
   const { data: session } = useSession();
+  const router = useRouter();
+  const pathname = usePathname();
   const [papers, setPapers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filterOptions, setFilterOptions] = useState({
@@ -52,8 +57,22 @@ export default function BrowsePapersPage() {
   const [savedPaperIds, setSavedPaperIds] = useState([]);
   const [savingPaperId, setSavingPaperId] = useState(null);
 
+  // Unlocked papers
+  const [unlockedPaperIds, setUnlockedPaperIds] = useState([]);
+  const [unlockingPaperId, setUnlockingPaperId] = useState(null);
+
+  // Unlock modal state
+  const [isUnlockModalOpen, setIsUnlockModalOpen] = useState(false);
+  const [selectedPaper, setSelectedPaper] = useState(null);
+  const [unlockError, setUnlockError] = useState("");
+  const [coinBalance, setCoinBalance] = useState(0);
+
   const semesterOptions = Array.from({ length: 12 }, (_, i) => i + 1);
   const yearOptions = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - i);
+
+  useEffect(() => {
+    setCoinBalance(session?.user?.coinBalance || 0);
+  }, [session?.user?.coinBalance]);
 
   // Fetch filter options on mount
   useEffect(() => {
@@ -79,12 +98,21 @@ export default function BrowsePapersPage() {
         // Check which papers are saved
         if (session?.user && result.papers.length > 0) {
           const paperIds = result.papers.map(p => p._id);
-          const savedResult = await checkSavedPapers(paperIds);
+          const [savedResult, unlockedResult] = await Promise.all([
+            checkSavedPapers(paperIds),
+            checkUnlockedPapers(paperIds),
+          ]);
+
           if (savedResult.success) {
             setSavedPaperIds(savedResult.savedPaperIds);
           }
+
+          if (unlockedResult.success) {
+            setUnlockedPaperIds(unlockedResult.unlockedPaperIds);
+          }
         } else {
           setSavedPaperIds([]);
+          setUnlockedPaperIds([]);
         }
       }
       setLoading(false);
@@ -119,6 +147,78 @@ export default function BrowsePapersPage() {
       setSavedPaperIds(prev => [...prev, paperId]);
     }
     setSavingPaperId(null);
+  };
+
+  const handleUnlockClick = (paper) => {
+    if (!session?.user) {
+      const callbackPath = encodeURIComponent(pathname || "/user/browse");
+      router.push(`/auth/login?callbackUrl=${callbackPath}`);
+      return;
+    }
+
+    if (unlockedPaperIds.includes(paper._id)) {
+      // Paper is already unlocked, navigate to read page
+      router.push(`/user/read/${paper._id}`);
+      return;
+    }
+
+    setSelectedPaper(paper);
+    setUnlockError("");
+    setIsUnlockModalOpen(true);
+  };
+
+  const handleConfirmUnlock = async () => {
+    if (!selectedPaper?._id || unlockingPaperId) {
+      return;
+    }
+
+    setUnlockError("");
+    setUnlockingPaperId(selectedPaper._id);
+
+    const result = await unlockPaper(selectedPaper._id);
+
+    if (result.success) {
+      setUnlockedPaperIds((prev) => {
+        if (prev.includes(selectedPaper._id)) return prev;
+        return [...prev, selectedPaper._id];
+      });
+
+      if (typeof result.coinBalance === "number") {
+        setCoinBalance(result.coinBalance);
+      }
+
+      if (!result.alreadyUnlocked) {
+        setPapers((prev) =>
+          prev.map((paper) =>
+            paper._id === selectedPaper._id
+              ? { ...paper, unlockCounts: (paper.unlockCounts || 0) + 1 }
+              : paper
+          )
+        );
+      }
+
+      setIsUnlockModalOpen(false);
+      setSelectedPaper(null);
+      
+      // Navigate to read page after successful unlock
+      setTimeout(() => {
+        router.push(`/user/read/${selectedPaper._id}`);
+      }, 300);
+    } else {
+      setUnlockError(result.error || "Unable to unlock this paper right now.");
+    }
+
+    setUnlockingPaperId(null);
+  };
+
+  const closeUnlockModal = () => {
+    if (unlockingPaperId) {
+      return;
+    }
+
+    setIsUnlockModalOpen(false);
+    setSelectedPaper(null);
+    setUnlockError("");
   };
 
   const activeFilterCount = Object.values(filters).filter(v => v !== "").length;
@@ -365,7 +465,10 @@ export default function BrowsePapersPage() {
                   index={index}
                   isSaved={savedPaperIds.includes(paper._id)}
                   isSaving={savingPaperId === paper._id}
+                  isUnlocked={unlockedPaperIds.includes(paper._id)}
+                  isUnlocking={unlockingPaperId === paper._id}
                   onSave={() => handleSavePaper(paper._id)}
+                  onUnlock={() => handleUnlockClick(paper)}
                   session={session}
                 />
               ))}
@@ -441,12 +544,26 @@ export default function BrowsePapersPage() {
           </>
         )}
       </div>
+
+      <AnimatePresence>
+        {isUnlockModalOpen && selectedPaper && (
+          <UnlockConfirmModal
+            paper={selectedPaper}
+            coinBalance={coinBalance}
+            unlockCost={UNLOCK_COST}
+            isSubmitting={unlockingPaperId === selectedPaper._id}
+            error={unlockError}
+            onClose={closeUnlockModal}
+            onConfirm={handleConfirmUnlock}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
 // Paper Card Component
-function PaperCard({ paper, index, isSaved, isSaving, onSave, session }) {
+function PaperCard({ paper, index, isSaved, isSaving, isUnlocked, isUnlocking, onSave, onUnlock, session }) {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
@@ -541,24 +658,167 @@ function PaperCard({ paper, index, isSaved, isSaving, onSave, session }) {
 
       {/* Unlock Button */}
       <button
+        type="button"
+        onClick={onUnlock}
+        disabled={isUnlocking}
         className="w-full flex items-center justify-center gap-2 rounded-lg py-3 text-sm font-semibold text-white transition-all hover:shadow-md"
         style={{
-          background: isHovered ? "#48A111" : "#25671E",
+          background: isUnlocked
+            ? "rgba(37, 103, 30, 0.88)"
+            : isHovered
+            ? "#48A111"
+            : "#25671E",
+          opacity: isUnlocking ? 0.85 : 1,
         }}
       >
         <div className="flex items-center gap-2">
-          <div
-            className="flex h-5 w-5 items-center justify-center rounded-full text-xs"
-            style={{
-              background: "#F2B50B",
-              boxShadow: "0 0 8px rgba(242,181,11,0.5)",
-            }}
-          >
-            🪙
-          </div>
-          <span>Unlock for 8 Coins</span>
+          {!isUnlocked && (
+            <div
+              className="flex h-5 w-5 items-center justify-center rounded-full text-xs"
+              style={{
+                background: "#F2B50B",
+                boxShadow: "0 0 8px rgba(242,181,11,0.5)",
+              }}
+            >
+              🪙
+            </div>
+          )}
+          <span>
+            {isUnlocked ? "Read Paper" : isUnlocking ? "Unlocking..." : "Unlock for 8 Coins"}
+          </span>
         </div>
       </button>
+    </motion.div>
+  );
+}
+
+function UnlockConfirmModal({
+  paper,
+  coinBalance,
+  unlockCost,
+  isSubmitting,
+  error,
+  onClose,
+  onConfirm,
+}) {
+  const insufficientCoins = coinBalance < unlockCost;
+  const postUnlockBalance = Math.max(coinBalance - unlockCost, 0);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      className="fixed inset-0 z-70 flex items-center justify-center p-4"
+      style={{ background: "rgba(17, 24, 39, 0.38)" }}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 12, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 12, scale: 0.98 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        className="w-full max-w-md rounded-2xl p-5 sm:p-6"
+        style={{
+          background: "rgba(247, 240, 240, 0.96)",
+          backdropFilter: "blur(18px)",
+          border: "1px solid rgba(37, 103, 30, 0.18)",
+          boxShadow: "0 18px 44px rgba(37, 103, 30, 0.18)",
+        }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold" style={{ color: "#25671E" }}>
+              Unlock Paper
+            </h3>
+            <p className="mt-1 text-sm" style={{ color: "#25671E", opacity: 0.68 }}>
+              Confirm to unlock this paper for coins.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="rounded-full p-1.5 transition-colors hover:bg-white/70"
+            style={{ color: "#25671E" }}
+            onClick={onClose}
+            disabled={isSubmitting}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div
+          className="mb-4 rounded-xl p-4"
+          style={{
+            background: "white",
+            border: "1px solid rgba(37, 103, 30, 0.12)",
+          }}
+        >
+          <p className="text-sm font-semibold line-clamp-2" style={{ color: "#25671E" }}>
+            {paper.subject}
+          </p>
+          <p className="mt-1 text-xs" style={{ color: "#25671E", opacity: 0.62 }}>
+            {paper.institute}
+          </p>
+        </div>
+
+        <div className="space-y-2 rounded-xl p-4" style={{ background: "rgba(37, 103, 30, 0.06)" }}>
+          <div className="flex items-center justify-between text-sm">
+            <span style={{ color: "#25671E", opacity: 0.72 }}>Current Balance</span>
+            <span className="font-semibold" style={{ color: "#25671E" }}>{coinBalance} coins</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span style={{ color: "#25671E", opacity: 0.72 }}>Unlock Cost</span>
+            <span className="font-semibold" style={{ color: "#B45309" }}>{unlockCost} coins</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span style={{ color: "#25671E", opacity: 0.72 }}>After Unlock</span>
+            <span className="font-semibold" style={{ color: insufficientCoins ? "#DC2626" : "#25671E" }}>
+              {postUnlockBalance} coins
+            </span>
+          </div>
+        </div>
+
+        {insufficientCoins && (
+          <p className="mt-3 text-sm font-semibold" style={{ color: "#DC2626" }}>
+            You do not have enough coins to unlock this paper.
+          </p>
+        )}
+
+        {error && (
+          <p className="mt-3 text-sm font-semibold" style={{ color: "#DC2626" }}>
+            {error}
+          </p>
+        )}
+
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="rounded-full px-4 py-2 text-sm font-semibold transition-all hover:opacity-80"
+            style={{
+              border: "1px solid rgba(37, 103, 30, 0.2)",
+              color: "#25671E",
+              background: "rgba(255,255,255,0.9)",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={insufficientCoins || isSubmitting}
+            className="rounded-full px-5 py-2 text-sm font-semibold text-white transition-all disabled:opacity-55"
+            style={{
+              background: "#25671E",
+              boxShadow: "0 6px 14px rgba(37, 103, 30, 0.32)",
+            }}
+          >
+            {isSubmitting ? "Unlocking..." : `Yes, Unlock for ${unlockCost}`}
+          </button>
+        </div>
+      </motion.div>
     </motion.div>
   );
 }
