@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { easeInOut, easeOut, motion } from "framer-motion";
 import { SquareArrowOutUpLeft } from "lucide-react";
+import GenerateButton from "@/components/GenerateButton";
 
 export default function ChatPage() {
   const [messages, setMessages] = useState([]);
@@ -105,19 +106,14 @@ export default function ChatPage() {
               Menu
             </p>
             <Link
-              href="/tutor"
+              href="/user/browse"
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-[16px] hover:bg-[#1b4332] text-white hover:opacity-80 transition"
             >
               Browse Previous Papers
             </Link>
+
             <Link
-              href="/mock-paper"
-              className="flex items-center gap-2 px-3 py-2 rounded-lg text-[16px] text-white hover:bg-[#1b4332] transition"
-            >
-              Generate Mock Paper
-            </Link>
-            <Link
-              href="/tutor"
+              href="/user/dashboard"
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-[16px] text-white hover:bg-[#1b4332] transition"
             >
               <SquareArrowOutUpLeft size={16} />
@@ -136,6 +132,7 @@ export default function ChatPage() {
 
       {/* Main Area */}
       <div className="flex-1 flex flex-col min-w-0">
+        <GenerateButton />
         {/* Messages Area */}
         <div className="flex-1 overflow-y-auto px-6 py-6">
           {/* Welcome Screen */}
@@ -221,7 +218,7 @@ export default function ChatPage() {
                 }
               }}
               placeholder="How can I help you today?"
-              className="flex-1 h-6.5 bg-transparent mx-auto block text-[16px] resize-none focus:outline-none text-[#1b4332] placeholder-[#94c4a8]"
+              className="flex-1 h-6.5 bg-transparent mx-auto block text-[16px] resize-none outline-none focus:outline-none text-[#1b4332] placeholder-[#94c4a8]"
             />
             <button
               onClick={() => sendMessage()}

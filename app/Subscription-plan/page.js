@@ -184,7 +184,7 @@ export default function SubscriptionPage() {
         {plans.map((plan) => (
           <div
             key={plan.name}
-            className={`group relative flex flex-col p-8 rounded-[28px] transition-all duration-300 hover:-translate-y-2 cursor-pointer overflow-hidden
+            className={`group relative flex flex-col p-8 rounded-[50px] transition-all duration-300 hover:-translate-y-2 cursor-pointer overflow-hidden
               ${
                 plan.color === "pro"
                   ? "bg-gradient-to-br from-green-200 via-green-300 to-green-400 border border-green-400 scale-105 shadow-xl shadow-green-500/30"
@@ -259,12 +259,12 @@ export default function SubscriptionPage() {
 
             <button
               onClick={() => handlePayment(plan, billing)}
-              className={`w-full py-3.5 rounded-xl font-['DM_Sans'] text-sm font-semibold tracking-wide transition-all duration-200 relative overflow-hidden active:scale-95
+              className={`w-full py-3.5 cursor-pointer rounded-xl font-['DM_Sans'] text-sm font-semibold tracking-wide transition-all duration-200 relative overflow-hidden active:scale-95
               ${
                 plan.color === "pro"
-                  ? "bg-gradient-to-br from-green-900 to-green-800 text-green-50 shadow-lg shadow-green-900/30"
+                  ? "bg-gradient-to-br cursor-pointer from-green-900 to-green-800 text-green-50 shadow-lg shadow-green-900/30"
                   : plan.color === "max"
-                    ? "bg-gradient-to-br from-green-400 to-green-500 text-green-950 shadow-lg shadow-green-500/30"
+                    ? "bg-gradient-to-br cursor-pointer from-green-400 to-green-500 text-green-950 shadow-lg shadow-green-500/30"
                     : "bg-gradient-to-br from-green-100 to-green-200 border border-green-300 text-green-700"
               }`}
             >
