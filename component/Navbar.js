@@ -27,6 +27,8 @@ export default function Navbar({ coins }) {
   const displayName = session?.user?.name?.trim() || "User";
   const avatarInitial = displayName.charAt(0).toUpperCase();
   const avatarUrl = session?.user?.pfp_url;
+  const isAdmin = session?.user?.role === "admin";
+  const dashboardHref = isAdmin ? "/admin/dashboard" : "/user/dashboard";
 
   return (
     <motion.header
@@ -56,7 +58,7 @@ export default function Navbar({ coins }) {
               <span className="text-lg">{logoHover ? "🔑" : "🔐"}</span>
             </div>
             <div className="flex items-baseline gap-1 text-lg font-semibold tracking-tight">
-              <span style={{ color: "#25671E" }}>VAULT</span>
+              <span style={{ color: "#25671E" }}>{isAdmin ? "VaultAdmin" : "VAULT"}</span>
               <span
                 className="h-2 w-2 rounded-full"
                 style={{
@@ -73,16 +75,18 @@ export default function Navbar({ coins }) {
               { label: "Browse", href: "/user/browse", authOnly: false },
               { label: "Upload", href: "/user/upload", authOnly: true },
               { label: "Leaderboard", href: "/user/leaderboard", authOnly: false },
+              { label: "Approval", href: "/admin/approval", authOnly: true, adminOnly: true },
+              { label: "Admin", href: "/admin/dashboard", authOnly: true, adminOnly: true },
             ]
-              .filter((item) => !item.authOnly || session?.user)
+              .filter((item) => (!item.authOnly || session?.user) && (!item.adminOnly || isAdmin))
               .map(({ label, href }) => (
                 <Link
-                key={label}
-                href={href}
-                className="font-medium transition-opacity hover:opacity-60"
-                style={{ color: "#25671E" }}
-              >
-                {label}
+                  key={label}
+                  href={href}
+                  className="font-medium transition-opacity hover:opacity-60"
+                  style={{ color: "#25671E" }}
+                >
+                  {label}
                 </Link>
               ))}
           </nav>
@@ -200,18 +204,21 @@ export default function Navbar({ coins }) {
                         className="md:hidden px-2 py-2"
                         style={{ borderBottom: "1px solid rgba(37, 103, 30, 0.1)", background: "rgba(37, 103, 30, 0.03)" }}
                       >
-                        {[{ label: "Browse", href: "/user/browse" }, { label: "Leaderboard", href: "/user/leaderboard" }]
-                          .map((item) => (
-                            <Link
-                              key={item.label}
-                              href={item.href}
-                              onClick={() => setIsMenuOpen(false)}
-                              className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors hover:bg-white/70"
-                              style={{ color: "#25671E" }}
-                            >
-                              {item.label}
-                            </Link>
-                          ))}
+                        {[
+                          { label: "Browse", href: "/user/browse" },
+                          { label: "Leaderboard", href: "/user/leaderboard" },
+                          ...(isAdmin ? [{ label: "Approval", href: "/admin/approval" }, { label: "Admin", href: "/admin/dashboard" }] : []),
+                        ].map((item) => (
+                          <Link
+                            key={item.label}
+                            href={item.href}
+                            onClick={() => setIsMenuOpen(false)}
+                            className="flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors hover:bg-white/70"
+                            style={{ color: "#25671E" }}
+                          >
+                            {item.label}
+                          </Link>
+                        ))}
                         {session?.user && (
                           <Link
                             href="/user/upload"
@@ -226,9 +233,11 @@ export default function Navbar({ coins }) {
 
                       <div className="px-2 py-2">
                         {[
-                          { label: "My Dashboard", href: "/user/dashboard", icon: <LayoutDashboard size={16} /> },
+                          { label: "My Dashboard", href: dashboardHref, icon: <LayoutDashboard size={16} /> },
+                          ...(isAdmin
+                            ? [{ label: "Approvals", href: "/admin/approval", icon: <Bookmark size={16} /> }]
+                            : [{ label: "My Saved Papers", href: "/user/saved-papers", icon: <Bookmark size={16} /> }]),
                           { label: "My Uploads", href: "/user/upload", icon: <Upload size={16} /> },
-                          { label: "My Saved Papers", href: "/user/saved-papers", icon: <Bookmark size={16} /> },
                           { label: "My Profile", href: "/user/profile", icon: <Settings size={16} /> },
                         ].map((item) => (
                           <Link
